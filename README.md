@@ -18,7 +18,7 @@ Nuestra tecnología conecta directamente tu dispositivo con el destinatario crea
 
 ## Características Principales
 
-### ⚡ **Velocidad Extrema**
+### **Velocidad Extrema**
 Transferencia peer-to-peer (P2P) directa. Sin intermediarios que ralenticen el proceso. Aprovecha todo el ancho de banda de tu red local o internet.
 
 ### **Privacidad Total**

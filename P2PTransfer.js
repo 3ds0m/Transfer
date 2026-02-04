@@ -38,7 +38,13 @@ const translations = {
         connFailed: "Conexión fallida. Intenta de nuevo.",
         transferComplete: "Transferencia completada!",
         stopScan: "Detener Cámara",
-        enterId: "Ingresa el ID del emisor"
+        enterId: "Ingresa el ID del emisor",
+        dragDropText: "Arrastra y suelta un archivo aquí o",
+        selectFileBtn: "Seleccionar archivo",
+        warningMsg: "⚠️ Importante: No cierres esta página hasta que el archivo haya sido recibido completamente.",
+        fileReceivedSender: "Archivo recibido por el destinatario. Esperando descarga...",
+        fileDownloadedSender: "¡Archivo descargado exitosamente!",
+        safeToClose: "✅ Archivo entregado y descargado. Es seguro cerrar esta página."
     },
     en: {
         title: "Fast P2P Transfer",
@@ -66,7 +72,13 @@ const translations = {
         connFailed: "Connection failed. Try again.",
         transferComplete: "Transfer complete!",
         stopScan: "Stop Camera",
-        enterId: "Enter Sender ID"
+        enterId: "Enter Sender ID",
+        dragDropText: "Drag and drop a file here or",
+        selectFileBtn: "Select File",
+        warningMsg: "⚠️ Important: Do not close this page until the file has been fully received.",
+        fileReceivedSender: "File received by recipient. Waiting for download...",
+        fileDownloadedSender: "File downloaded successfully!",
+        safeToClose: "✅ File delivered and downloaded. It is safe to close this page."
     }
 };
 
@@ -87,6 +99,13 @@ function init() {
     
     // Sender
     document.getElementById('fileInput').onchange = handleFileSelect;
+    document.getElementById('customFileBtn').onclick = () => document.getElementById('fileInput').click();
+    
+    const uploadZone = document.getElementById('uploadZone');
+    uploadZone.addEventListener('dragover', handleDragOver);
+    uploadZone.addEventListener('dragleave', handleDragLeave);
+    uploadZone.addEventListener('drop', handleDrop);
+
     document.getElementById('copyOfferBtn').onclick = () => copyToClipboard('offerCode');
 
     // Receiver
@@ -243,7 +262,10 @@ function startSenderFlow() {
 function handleFileSelect(e) {
     const file = e.target.files[0];
     if (!file) return;
-    
+    processFile(file);
+}
+
+function processFile(file) {
     fileToSend = file;
     const t = translations[currentLang];
     document.getElementById('fileInfo').textContent = `${t.fileSelected} ${file.name} (${formatSize(file.size)})`;
@@ -254,6 +276,31 @@ function handleFileSelect(e) {
     document.getElementById('generatingCodeSpinner').style.display = 'block';
     
     initializePeer(true);
+}
+
+function handleDragOver(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    document.getElementById('uploadZone').classList.add('dragover');
+}
+
+function handleDragLeave(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    document.getElementById('uploadZone').classList.remove('dragover');
+}
+
+function handleDrop(e) {
+    e.preventDefault();
+    e.stopPropagation();
+    document.getElementById('uploadZone').classList.remove('dragover');
+    
+    const dt = e.dataTransfer;
+    const file = dt.files[0];
+    
+    if (file) {
+        processFile(file);
+    }
 }
 
 // --- Receiver Logic ---
@@ -431,6 +478,17 @@ function handleMessage(data) {
         // Force UI transition to receiving state
         document.getElementById('receiverStep2').classList.add('hidden');
         document.getElementById('receiverStep3').classList.remove('hidden');
+    } else if (data && data.type === 'transfer-complete') {
+        const t = translations[currentLang];
+        document.getElementById('sendStatus').textContent = t.fileReceivedSender;
+    } else if (data && data.type === 'file-downloaded') {
+        const t = translations[currentLang];
+        const warningMsg = document.getElementById('warningMsg');
+        if(warningMsg) {
+            warningMsg.textContent = t.safeToClose;
+            warningMsg.classList.add('success');
+        }
+        document.getElementById('sendStatus').textContent = t.fileDownloadedSender;
     } else {
         // Binary chunk handling
         let chunk = data;
@@ -473,6 +531,11 @@ function finishReceive() {
     const t = translations[currentLang];
     document.getElementById('receiveStatus').textContent = t.transferComplete;
     
+    // Notify sender
+    if(conn && conn.open) {
+        conn.send({ type: 'transfer-complete' });
+    }
+
     const blob = new Blob(receivedBuffers, { type: fileMeta.mime });
     const url = URL.createObjectURL(blob);
     
@@ -481,6 +544,13 @@ function finishReceive() {
     link.download = fileMeta.name;
     link.textContent = `${t.download} (${formatSize(expectedSize)})`;
     link.classList.remove('hidden');
+    
+    // Notify sender on download
+    link.onclick = () => {
+        if(conn && conn.open) {
+            conn.send({ type: 'file-downloaded' });
+        }
+    };
     
     receivedBuffers = []; // Clear memory
 }

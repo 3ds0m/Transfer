@@ -33,7 +33,12 @@
             <h2 data-i18n="senderMode" style="margin-bottom: 20px; font-size: 18px;">Modo: Enviar</h2>
             
             <div id="senderStep1">
-                <input type="file" id="fileInput">
+                <div class="upload-zone" id="uploadZone">
+                    <div class="upload-icon">📤</div>
+                    <div class="upload-text" data-i18n="dragDropText">Arrastra y suelta un archivo aquí o</div>
+                    <button class="btn-primary upload-btn" id="customFileBtn" data-i18n="selectFileBtn">Seleccionar archivo</button>
+                    <input type="file" id="fileInput" style="display: none;">
+                </div>
                 <div id="fileInfo" class="status-msg"></div>
             </div>
 
@@ -54,6 +59,7 @@
                  <p data-i18n="sending" style="text-align:center; font-weight:500;">Enviando...</p>
                  <progress id="sendProgress" value="0" max="100"></progress>
                  <div id="sendStatus" class="status-msg"></div>
+                 <div id="warningMsg" class="warning-msg" data-i18n="warningMsg">⚠️ Importante: No cierres esta página hasta que el archivo haya sido recibido completamente.</div>
             </div>
         </div>
 

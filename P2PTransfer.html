@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>P2P File Transfer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <link rel="stylesheet" href="P2PTransfer.css">
+</head>
+<body>
+    <div class="card">
+        <header>
+            <select id="langSelect">
+                <option value="es">Español</option>
+                <option value="en">English</option>
+            </select>
+            <button id="themeToggle">🌙</button>
+        </header>
+
+        <!-- Pantalla principal -->
+        <div id="mainScreen">
+            <h1 data-i18n="title">Transferencia P2P Segura</h1>
+            <p style="text-align: center; color: var(--secondary-text); margin-bottom: 30px;" data-i18n="subtitle">Transfiere archivos directamente entre dispositivos sin servidores.</p>
+            <button id="senderBtn" class="btn-primary" data-i18n="send">Enviar Archivo</button>
+            <button id="receiverBtn" class="btn-primary" data-i18n="receive">Recibir Archivo</button>
+        </div>
+
+        <!-- Panel Enviar -->
+        <div id="senderPanel" class="hidden">
+            <button class="back-btn" onclick="showMain()"><span style="margin-right:5px">←</span> <span data-i18n="back">Volver</span></button>
+            <h2 data-i18n="senderMode" style="margin-bottom: 20px; font-size: 18px;">Modo: Enviar</h2>
+            
+            <div id="senderStep1">
+                <input type="file" id="fileInput">
+                <div id="fileInfo" class="status-msg"></div>
+            </div>
+
+            <div id="senderStep2" class="hidden">
+                <div class="code-section">
+                    <p data-i18n="step1Desc" style="margin-bottom:10px; font-size:13px; color:var(--secondary-text)">1. Comparte este código o muestra el QR al receptor</p>
+                    <div id="qrSenderContainer"></div>
+                    <div id="generatingCodeSpinner" class="status-msg" style="display:none; margin: 20px 0;">
+                        <span class="spinner"></span> <span data-i18n="generating">Generando código único...</span>
+                    </div>
+                    <textarea id="offerCode" readonly onclick="this.select()"></textarea>
+                    <button id="copyOfferBtn" class="btn-secondary" data-i18n="copy">Copiar Código</button>
+                </div>
+
+                <div class="answer-section">
+                    <p data-i18n="step2Desc" style="margin-bottom:10px; font-size:13px; color:var(--secondary-text)">2. Pega el código de respuesta del receptor</p>
+                    <input id="answerCodeInput" placeholder="">
+                    <button id="connectBtn" class="btn-primary" data-i18n="connect" disabled>Conectar</button>
+                </div>
+            </div>
+
+            <div id="senderStep3" class="hidden">
+                 <p data-i18n="sending" style="text-align:center; font-weight:500;">Enviando...</p>
+                 <progress id="sendProgress" value="0" max="100"></progress>
+                 <div id="sendStatus" class="status-msg"></div>
+            </div>
+        </div>
+
+        <!-- Panel Recibir -->
+        <div id="receiverPanel" class="hidden">
+            <button class="back-btn" onclick="showMain()"><span style="margin-right:5px">←</span> <span data-i18n="back">Volver</span></button>
+            <h2 data-i18n="receiverMode" style="margin-bottom: 20px; font-size: 18px;">Modo: Recibir</h2>
+
+            <div id="receiverStep1">
+                <div class="code-section">
+                    <p data-i18n="stepRec1Desc" style="margin-bottom:10px; font-size:13px; color:var(--secondary-text)">1. Escanea el QR del emisor o pega el código</p>
+                    <button id="scanQrBtn" class="btn-secondary" style="margin-bottom:10px;" data-i18n="scanQr">Escanear QR</button>
+                    <video id="qrScanner" class="hidden" playsinline></video>
+                    <input id="offerCodeInput" placeholder="">
+                    <button id="processOfferBtn" class="btn-primary" data-i18n="processOffer" disabled>Generar Respuesta</button>
+                </div>
+            </div>
+
+            <div id="receiverStep2" class="hidden">
+                <div class="code-section">
+                    <p data-i18n="stepRec2Desc" style="margin-bottom:10px; font-size:13px; color:var(--secondary-text)">2. Comparte este código de respuesta con el emisor</p>
+                    <div id="qrAnswerContainer"></div>
+                    <textarea id="answerCode" readonly onclick="this.select()"></textarea>
+                    <button id="copyAnswerBtn" class="btn-secondary" data-i18n="copy">Copiar Código Respuesta</button>
+                </div>
+                <div class="status-msg">
+                    <span class="spinner"></span> <span data-i18n="waitingForConnection">Esperando conexión...</span>
+                </div>
+            </div>
+
+            <div id="receiverStep3" class="hidden">
+                <p data-i18n="receiving" style="text-align:center; font-weight:500;">Recibiendo...</p>
+                <progress id="receiveProgress" value="0" max="100"></progress>
+                <div id="receiveStatus" class="status-msg"></div>
+                <a id="downloadLink" class="hidden" download></a>
+            </div>
+        </div>
+    </div>
+
+<script src="P2PTransfer.js"></script>
+</body>
+</html>

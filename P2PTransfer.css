@@ -91,6 +91,20 @@ button:active {
     box-shadow: 0 4px 12px rgba(0,122,255,0.2);
 }
 
+.btn-send {
+    background-color: var(--accent-color); /* Blue */
+    box-shadow: 0 4px 12px rgba(0,122,255,0.2);
+}
+
+.btn-receive {
+    background-color: var(--success-color); /* Green */
+    box-shadow: 0 4px 12px rgba(52, 199, 89, 0.2);
+}
+
+.btn-receive:hover {
+    background-color: #248a3d;
+}
+
 .btn-primary:hover {
     background-color: var(--accent-hover);
 }

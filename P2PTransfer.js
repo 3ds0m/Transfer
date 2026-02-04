@@ -45,7 +45,8 @@ const translations = {
         fileReceivedSender: "Archivo recibido por el destinatario. Esperando descarga...",
         fileDownloadedSender: "¡Archivo descargado exitosamente!",
         safeToClose: "✅ Archivo entregado y descargado. Es seguro cerrar esta página.",
-        waitingPeer: "Conectado. Esperando al otro dispositivo..."
+        waitingPeer: "Conectado. Esperando al otro dispositivo...",
+        verifying: "Verificando recepción..."
     },
     en: {
         title: "Fast P2P Transfer",
@@ -80,7 +81,8 @@ const translations = {
         fileReceivedSender: "File received by recipient. Waiting for download...",
         fileDownloadedSender: "File downloaded successfully!",
         safeToClose: "✅ File delivered and downloaded. It is safe to close this page.",
-        waitingPeer: "Connected. Waiting for peer..."
+        waitingPeer: "Connected. Waiting for peer...",
+        verifying: "Verifying receipt..."
     }
 };
 
@@ -322,7 +324,11 @@ function connectToPeer() {
     // Use default serialization (BinaryPack) which handles both JSON and ArrayBuffer correctly
     conn = peer.connect(targetId);
     
+    let isConnected = false;
+
     conn.on('open', () => {
+        if (isConnected) return;
+        isConnected = true;
         setupConnection(conn, false);
     });
     
@@ -332,7 +338,10 @@ function connectToPeer() {
     
     // Force open check after a timeout
     setTimeout(() => {
-        if(conn && conn.open) setupConnection(conn, false);
+        if(conn && conn.open && !isConnected) {
+            isConnected = true;
+            setupConnection(conn, false);
+        }
     }, 1000);
 }
 
@@ -452,18 +461,22 @@ async function sendFile() {
         // Update UI intelligently (not every chunk)
         const now = Date.now();
         if (now - lastUiUpdate > updateInterval || i === totalChunks - 1) {
-            const percent = (offset / fileToSend.size) * 100;
-            document.getElementById('sendProgress').value = Math.min(percent, 100);
+            // Account for buffered amount to show "real" network progress
+            const buffered = conn.dataChannel.bufferedAmount || 0;
+            const sentBytes = Math.max(0, offset - buffered);
+            const percent = (sentBytes / fileToSend.size) * 100;
+            
+            // Cap at 99% until confirmed
+            document.getElementById('sendProgress').value = Math.min(percent, 99);
             
             // Calculate stats
             const elapsed = (now - startTime) / 1000; // seconds
             if (elapsed > 0) {
-                const speed = offset / elapsed; // bytes/sec
-                const remaining = fileToSend.size - offset;
-                const eta = remaining / speed;
+                const speed = sentBytes / elapsed; // bytes/sec
+                const remaining = (fileToSend.size - sentBytes) / speed;
                 
                 document.getElementById('senderStats').textContent = 
-                    `${Math.round(percent)}% | ${formatSize(speed)}/s | ETA: ${formatTime(eta)}`;
+                    `${Math.round(percent)}% | ${formatSize(speed)}/s | ETA: ${formatTime(remaining)}`;
             }
 
             lastUiUpdate = now;
@@ -472,9 +485,22 @@ async function sendFile() {
             await new Promise(r => setTimeout(r, 0));
         }
     }
+
+    // Wait for buffer to drain completely
+    while (conn.dataChannel.bufferedAmount > 0) {
+        if(!conn.open) break;
+        const buffered = conn.dataChannel.bufferedAmount;
+        const sentBytes = Math.max(0, fileToSend.size - buffered);
+        const percent = (sentBytes / fileToSend.size) * 100;
+        
+        document.getElementById('sendProgress').value = Math.min(percent, 99);
+        document.getElementById('senderStats').textContent = `${Math.round(percent)}% | Enviando últimos datos...`;
+        
+        await new Promise(r => setTimeout(r, 100));
+    }
     
-    document.getElementById('senderStats').textContent = "100%";
-    document.getElementById('sendStatus').textContent = translations[currentLang].transferComplete;
+    // Do NOT show 100% yet. Wait for 'transfer-complete' message from receiver.
+    document.getElementById('sendStatus').textContent = translations[currentLang].verifying;
 }
 
 let lastReceiverUpdate = 0;
@@ -511,6 +537,8 @@ function handleMessage(data) {
         document.getElementById('receiverStep3').classList.remove('hidden');
     } else if (data && data.type === 'transfer-complete') {
         const t = translations[currentLang];
+        document.getElementById('sendProgress').value = 100;
+        document.getElementById('senderStats').textContent = "100%";
         document.getElementById('sendStatus').textContent = t.fileReceivedSender;
     } else if (data && data.type === 'file-downloaded') {
         const t = translations[currentLang];

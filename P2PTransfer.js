@@ -1,9 +1,8 @@
 // --- Configuración y Estado ---
-const iceConfig = {
-    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-};
-const CHUNK_SIZE = 16384; // 16KB
-let pc, dataChannel;
+const CHUNK_SIZE = 64 * 1024; // 64KB for better throughput
+let peer;
+let conn;
+let myId = '';
 let fileToSend;
 let receivedBuffers = [];
 let receivedSize = 0;
@@ -14,64 +13,60 @@ let isScanning = false;
 // --- Traducciones ---
 const translations = {
     es: {
-        title: "Transferencia P2P Segura",
-        subtitle: "Transfiere archivos directamente entre dispositivos sin servidores.",
+        title: "Transferencia P2P Rápida",
+        subtitle: "Transfiere archivos usando un código corto de 6 caracteres.",
         send: "Enviar Archivo",
         receive: "Recibir Archivo",
         back: "Volver",
         senderMode: "Modo: Enviar",
         receiverMode: "Modo: Recibir",
-        step1Desc: "1. Comparte este código o muestra el QR al receptor",
-        step2Desc: "2. Pega el código de respuesta del receptor",
-        copy: "Copiar Código",
+        step1Desc: "1. Tu ID de conexión (Compártelo):",
+        step2Desc: "Esperando a que el receptor se conecte...",
+        copy: "Copiar",
         connect: "Conectar",
         scanQr: "Escanear QR",
-        processOffer: "Generar Respuesta",
-        stepRec1Desc: "1. Escanea el QR del emisor o pega el código",
-        stepRec2Desc: "2. Comparte este código de respuesta con el emisor",
+        stepRec1Desc: "1. Ingresa el ID del emisor o escanea QR:",
         waitingForConnection: "Esperando conexión...",
         sending: "Enviando archivo...",
         receiving: "Recibiendo archivo...",
         download: "Descargar Archivo",
-        offerCodePlaceholder: "Generando código...",
-        generating: "Generando código de conexión (esto puede tardar unos segundos)...",
-        answerCodeInputPlaceholder: "Pega código de respuesta aquí",
-        offerCodeInputPlaceholder: "Pega código aquí o escanea QR",
+        offerCodePlaceholder: "Generando ID...",
+        generating: "Conectando al servidor de señalización...",
+        offerCodeInputPlaceholder: "Ej: X9Y2Z1",
         fileSelected: "Archivo seleccionado: ",
-        connEstablished: "Conexión establecida. Iniciando transferencia...",
+        connEstablished: "¡Conectado! Iniciando transferencia...",
         connFailed: "Conexión fallida. Intenta de nuevo.",
         transferComplete: "Transferencia completada!",
-        stopScan: "Detener Cámara"
+        stopScan: "Detener Cámara",
+        enterId: "Ingresa el ID del emisor"
     },
     en: {
-        title: "Secure P2P Transfer",
-        subtitle: "Transfer files directly between devices without servers.",
+        title: "Fast P2P Transfer",
+        subtitle: "Transfer files using a short 6-character code.",
         send: "Send File",
         receive: "Receive File",
         back: "Back",
         senderMode: "Sender Mode",
         receiverMode: "Receiver Mode",
-        step1Desc: "1. Share this code or show QR to receiver",
-        step2Desc: "2. Paste the receiver's answer code",
-        copy: "Copy Code",
+        step1Desc: "1. Your Connection ID (Share it):",
+        step2Desc: "Waiting for receiver to connect...",
+        copy: "Copy",
         connect: "Connect",
         scanQr: "Scan QR",
-        processOffer: "Generate Answer",
-        stepRec1Desc: "1. Scan sender's QR or paste code",
-        stepRec2Desc: "2. Share this answer code with sender",
+        stepRec1Desc: "1. Enter sender ID or scan QR:",
         waitingForConnection: "Waiting for connection...",
         sending: "Sending file...",
         receiving: "Receiving file...",
         download: "Download File",
-        offerCodePlaceholder: "Generating code...",
-        generating: "Generating connection code (this may take a few seconds)...",
-        answerCodeInputPlaceholder: "Paste answer code here",
-        offerCodeInputPlaceholder: "Paste code here or scan QR",
+        offerCodePlaceholder: "Generating ID...",
+        generating: "Connecting to signaling server...",
+        offerCodeInputPlaceholder: "Ex: X9Y2Z1",
         fileSelected: "File selected: ",
-        connEstablished: "Connection established. Starting transfer...",
+        connEstablished: "Connected! Starting transfer...",
         connFailed: "Connection failed. Try again.",
         transferComplete: "Transfer complete!",
-        stopScan: "Stop Camera"
+        stopScan: "Stop Camera",
+        enterId: "Enter Sender ID"
     }
 };
 
@@ -93,20 +88,79 @@ function init() {
     // Sender
     document.getElementById('fileInput').onchange = handleFileSelect;
     document.getElementById('copyOfferBtn').onclick = () => copyToClipboard('offerCode');
-    document.getElementById('answerCodeInput').oninput = (e) => {
-        document.getElementById('connectBtn').disabled = !e.target.value.trim();
-    };
-    document.getElementById('connectBtn').onclick = handleSenderConnect;
 
     // Receiver
     document.getElementById('scanQrBtn').onclick = toggleQRScanner;
     document.getElementById('offerCodeInput').oninput = (e) => {
-        document.getElementById('processOfferBtn').disabled = !e.target.value.trim();
+        e.target.value = e.target.value.toUpperCase(); // Force uppercase
+        document.getElementById('connectBtn').disabled = e.target.value.trim().length < 4;
     };
-    document.getElementById('processOfferBtn').onclick = handleReceiverOffer;
-    document.getElementById('copyAnswerBtn').onclick = () => copyToClipboard('answerCode');
+    document.getElementById('connectBtn').onclick = connectToPeer;
 
     setLanguage('es');
+}
+
+function generateShortId() {
+    // Generates a random 6-character alphanumeric ID (uppercase)
+    return Math.random().toString(36).substr(2, 6).toUpperCase();
+}
+
+function initializePeer(isSender) {
+    if (peer) peer.destroy();
+    
+    // Use a random short ID for everyone to avoid collisions, but we can try to use a custom one if needed.
+    // PeerJS Cloud doesn't support forcing custom IDs reliably if taken, so random is safer.
+    // But for "User Experience", we want the Sender to have a fixed ID they can share.
+    
+    const id = generateShortId();
+    myId = id;
+    
+    peer = new Peer(id, {
+        debug: 2,
+        config: {
+            iceServers: [
+                { urls: 'stun:stun.l.google.com:19302' },
+                { urls: 'stun:global.stun.twilio.com:3478' }
+            ]
+        }
+    });
+
+    peer.on('open', (id) => {
+        console.log('My peer ID is: ' + id);
+        if (isSender) {
+            document.getElementById('generatingCodeSpinner').style.display = 'none';
+            document.getElementById('offerCode').classList.remove('hidden');
+            document.getElementById('copyOfferBtn').classList.remove('hidden');
+            document.getElementById('qrSenderContainer').classList.remove('hidden');
+            
+            document.getElementById('offerCode').value = id;
+            generateQR('qrSenderContainer', id);
+        }
+    });
+
+    peer.on('connection', (connection) => {
+        // Handle incoming connection (Sender receives connection from Receiver)
+        if (conn && conn.open) {
+            connection.close(); // Only one connection allowed
+            return;
+        }
+        
+        conn = connection;
+        
+        // Ensure connection is fully open before setting up
+        if (conn.open) {
+            setupConnection(conn, true);
+        } else {
+            conn.on('open', () => {
+                setupConnection(conn, true);
+            });
+        }
+    });
+
+    peer.on('error', (err) => {
+        console.error(err);
+        alert("Error de conexión (PeerJS): " + err.type);
+    });
 }
 
 function toggleTheme() {
@@ -127,10 +181,8 @@ function setLanguage(lang) {
     
     // Update placeholders
     document.getElementById('offerCode').placeholder = t.offerCodePlaceholder;
-    document.getElementById('answerCodeInput').placeholder = t.answerCodeInputPlaceholder;
     document.getElementById('offerCodeInput').placeholder = t.offerCodeInputPlaceholder;
     
-    // Update dynamic texts if needed
     if(isScanning) {
         document.getElementById('scanQrBtn').textContent = t.stopScan;
     }
@@ -144,8 +196,8 @@ function showMain() {
 }
 
 function resetState() {
-    if(pc) { pc.close(); pc = null; }
-    if(dataChannel) { dataChannel.close(); dataChannel = null; }
+    if(peer) { peer.destroy(); peer = null; }
+    if(conn) { conn.close(); conn = null; }
     fileToSend = null;
     receivedBuffers = [];
     receivedSize = 0;
@@ -155,20 +207,17 @@ function resetState() {
     document.getElementById('senderStep1').classList.remove('hidden');
     document.getElementById('senderStep2').classList.add('hidden');
     document.getElementById('senderStep3').classList.add('hidden');
+    
     document.getElementById('receiverStep1').classList.remove('hidden');
     document.getElementById('receiverStep2').classList.add('hidden');
-    document.getElementById('receiverStep3').classList.add('hidden');
     
     document.getElementById('fileInput').value = '';
     document.getElementById('offerCode').value = '';
-    document.getElementById('answerCodeInput').value = '';
     document.getElementById('offerCodeInput').value = '';
-    document.getElementById('answerCode').value = '';
     
     document.getElementById('sendProgress').value = 0;
     document.getElementById('receiveProgress').value = 0;
     document.getElementById('qrSenderContainer').innerHTML = '';
-    document.getElementById('qrAnswerContainer').innerHTML = '';
     document.getElementById('downloadLink').classList.add('hidden');
     document.getElementById('fileInfo').textContent = '';
     document.getElementById('sendStatus').textContent = '';
@@ -181,9 +230,7 @@ function copyToClipboard(elementId) {
     const el = document.getElementById(elementId);
     el.select();
     document.execCommand('copy');
-    const originalText = el.nextElementSibling.textContent;
-    el.nextElementSibling.textContent = "Copied!";
-    setTimeout(() => el.nextElementSibling.textContent = originalText, 2000);
+    // Visual feedback handled by CSS or could add here
 }
 
 // --- Sender Logic ---
@@ -201,59 +248,12 @@ function handleFileSelect(e) {
     const t = translations[currentLang];
     document.getElementById('fileInfo').textContent = `${t.fileSelected} ${file.name} (${formatSize(file.size)})`;
     
-    createOffer();
-}
-
-async function createOffer() {
-    // Show loading state immediately
+    // Start Peer immediately to generate ID
     document.getElementById('senderStep1').classList.add('hidden');
     document.getElementById('senderStep2').classList.remove('hidden');
-    document.getElementById('offerCode').classList.add('hidden');
-    document.getElementById('copyOfferBtn').classList.add('hidden');
-    document.getElementById('qrSenderContainer').classList.add('hidden');
     document.getElementById('generatingCodeSpinner').style.display = 'block';
-
-    try {
-        pc = new RTCPeerConnection(iceConfig);
-        dataChannel = pc.createDataChannel('fileTransfer');
-        setupDataChannel(dataChannel, true);
-
-        pc.onicecandidate = (e) => {
-            if (e.candidate === null) {
-                // ICE gathering finished
-                const offerJson = JSON.stringify(pc.localDescription);
-                const encodedOffer = btoa(offerJson);
-                
-                // Show result
-                document.getElementById('generatingCodeSpinner').style.display = 'none';
-                document.getElementById('offerCode').classList.remove('hidden');
-                document.getElementById('copyOfferBtn').classList.remove('hidden');
-                document.getElementById('qrSenderContainer').classList.remove('hidden');
-                
-                document.getElementById('offerCode').value = encodedOffer;
-                generateQR('qrSenderContainer', encodedOffer);
-            }
-        };
-
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-    } catch (e) {
-        alert("Error creando conexión: " + e.message);
-        showMain();
-    }
-}
-
-async function handleSenderConnect() {
-    const answerCode = document.getElementById('answerCodeInput').value.trim();
-    if(!answerCode) return;
-
-    try {
-        const answerDesc = JSON.parse(atob(answerCode));
-        await pc.setRemoteDescription(answerDesc);
-        document.getElementById('connectBtn').textContent = "Connecting...";
-    } catch (e) {
-        alert("Error parsing answer code: " + e.message);
-    }
+    
+    initializePeer(true);
 }
 
 // --- Receiver Logic ---
@@ -261,129 +261,207 @@ async function handleSenderConnect() {
 function startReceiverFlow() {
     document.getElementById('mainScreen').classList.add('hidden');
     document.getElementById('receiverPanel').classList.remove('hidden');
+    initializePeer(false); // Init peer so we can connect
 }
 
-async function handleReceiverOffer() {
-    const offerCode = document.getElementById('offerCodeInput').value.trim();
-    if(!offerCode) return;
+function connectToPeer() {
+    const targetId = document.getElementById('offerCodeInput').value.trim().toUpperCase();
+    if(!targetId) return;
 
-    try {
-        const offerDesc = JSON.parse(atob(offerCode));
-        pc = new RTCPeerConnection(iceConfig);
+    if (!peer || peer.destroyed) initializePeer(false);
 
-        pc.ondatachannel = (e) => {
-            dataChannel = e.channel;
-            setupDataChannel(dataChannel, false);
-        };
+    // Use default serialization (BinaryPack) which handles both JSON and ArrayBuffer correctly
+    conn = peer.connect(targetId);
+    
+    conn.on('open', () => {
+        setupConnection(conn, false);
+    });
+    
+    conn.on('error', (err) => {
+        alert("Error connecting to peer: " + err);
+    });
+    
+    // Force open check after a timeout
+    setTimeout(() => {
+        if(conn && conn.open) setupConnection(conn, false);
+    }, 1000);
+}
 
-        pc.onicecandidate = (e) => {
-            if(e.candidate === null) {
-                const answerJson = JSON.stringify(pc.localDescription);
-                const encodedAnswer = btoa(answerJson);
-                document.getElementById('answerCode').value = encodedAnswer;
-                generateQR('qrAnswerContainer', encodedAnswer);
-                
-                document.getElementById('receiverStep1').classList.add('hidden');
-                document.getElementById('receiverStep2').classList.remove('hidden');
+// --- Connection & Transfer ---
+
+function setupConnection(connection, isSender) {
+    conn = connection;
+    
+    conn.on('data', handleMessage);
+    
+    conn.on('close', () => {
+        alert("Connection closed");
+        showMain();
+    });
+
+    const t = translations[currentLang];
+    
+    if(isSender) {
+        document.getElementById('senderStep2').classList.add('hidden');
+        document.getElementById('senderStep3').classList.remove('hidden');
+        document.getElementById('sendStatus').textContent = "Conectado. Verificando canal...";
+        
+        // Retry Handshake loop
+        let attempts = 0;
+        const handshakeInterval = setInterval(() => {
+            if(!conn || !conn.open) {
+                clearInterval(handshakeInterval);
+                return;
             }
-        };
-
-        await pc.setRemoteDescription(offerDesc);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-    } catch (e) {
-        alert("Error processing offer: " + e.message);
+            if(attempts >= 5) {
+                // If handshake fails after 5 seconds, try forcing transfer anyway
+                clearInterval(handshakeInterval);
+                document.getElementById('sendStatus').textContent = "Tiempo de espera agotado. Forzando envío...";
+                sendFile();
+                return;
+            }
+            
+            console.log("Sending PING (attempt " + (attempts+1) + ")");
+            conn.send({ type: 'ping' });
+            attempts++;
+        }, 1000);
+        
+        // Also send one immediately
+        conn.send({ type: 'ping' });
+        
+        // Store interval ID to clear it later if PONG received
+        conn.handshakeInterval = handshakeInterval;
+        
+    } else {
+        document.getElementById('receiverStep1').classList.add('hidden');
+        document.getElementById('receiverStep2').classList.remove('hidden');
+        document.getElementById('receiveStatus').textContent = t.connEstablished;
     }
 }
 
-// --- Data Channel & Transfer ---
-
-function setupDataChannel(channel, isSender) {
-    channel.onopen = () => {
-        const t = translations[currentLang];
-        if(isSender) {
-            document.getElementById('senderStep2').classList.add('hidden');
-            document.getElementById('senderStep3').classList.remove('hidden');
-            document.getElementById('sendStatus').textContent = t.connEstablished;
-            sendFile();
-        } else {
-            document.getElementById('receiverStep2').classList.add('hidden');
-            document.getElementById('receiverStep3').classList.remove('hidden');
-            document.getElementById('receiveStatus').textContent = t.connEstablished;
-        }
-    };
-
-    channel.onmessage = handleMessage;
-}
-
 async function sendFile() {
-    if(!fileToSend || !dataChannel) return;
+    if(!fileToSend || !conn) return;
     
+    document.getElementById('sendStatus').textContent = translations[currentLang].sending;
+
     // 1. Send Metadata
     const meta = {
         type: 'metadata',
         name: fileToSend.name,
         size: fileToSend.size,
-        mime: fileToSend.type
+        mime: fileToSend.type || 'application/octet-stream'
     };
-    dataChannel.send(JSON.stringify(meta));
+    conn.send(meta);
 
     // 2. Send Chunks
     const totalChunks = Math.ceil(fileToSend.size / CHUNK_SIZE);
     let offset = 0;
     
+    // Performance metrics
+    let lastUiUpdate = 0;
+    const updateInterval = 100; // Update UI max every 100ms
+    
+    // Buffer limits
+    const MAX_BUFFERED_AMOUNT = 16 * 1024 * 1024; // 16MB
+    const RESUME_THRESHOLD = 8 * 1024 * 1024;     // 8MB
+
     for(let i = 0; i < totalChunks; i++) {
-        if(dataChannel.readyState !== 'open') break;
+        if(!conn.open) break;
         
-        const slice = fileToSend.slice(offset, offset + CHUNK_SIZE);
-        const buffer = await slice.arrayBuffer();
-        
-        // Flow control: wait if buffer is full
-        if (dataChannel.bufferedAmount > 16 * 1024 * 1024) { // 16MB limit
-            await new Promise(r => {
+        // Flow control: wait if buffer is too full
+        if (conn.dataChannel && conn.dataChannel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
+            await new Promise(resolve => {
                 const check = setInterval(() => {
-                    if (dataChannel.bufferedAmount < 4 * 1024 * 1024) {
+                    if (!conn.dataChannel || conn.dataChannel.bufferedAmount < RESUME_THRESHOLD) {
                         clearInterval(check);
-                        r();
+                        resolve();
                     }
                 }, 50);
             });
         }
 
-        dataChannel.send(buffer);
+        const slice = fileToSend.slice(offset, offset + CHUNK_SIZE);
+        const buffer = await slice.arrayBuffer();
+        
+        conn.send(buffer);
         offset += CHUNK_SIZE;
         
-        // Update UI
-        const percent = (offset / fileToSend.size) * 100;
-        document.getElementById('sendProgress').value = Math.min(percent, 100);
-        
-        // Allow UI to update
-        if(i % 100 === 0) await new Promise(r => setTimeout(r, 0));
+        // Update UI intelligently (not every chunk)
+        const now = Date.now();
+        if (now - lastUiUpdate > updateInterval || i === totalChunks - 1) {
+            const percent = (offset / fileToSend.size) * 100;
+            document.getElementById('sendProgress').value = Math.min(percent, 100);
+            lastUiUpdate = now;
+            
+            // Yield to main thread to keep UI responsive
+            await new Promise(r => setTimeout(r, 0));
+        }
     }
     
     document.getElementById('sendStatus').textContent = translations[currentLang].transferComplete;
 }
 
-function handleMessage(event) {
-    const data = event.data;
+let lastReceiverUpdate = 0;
+
+function handleMessage(data) {
+    console.log("Received data:", data);
     
-    if (typeof data === 'string') {
-        const msg = JSON.parse(data);
-        if(msg.type === 'metadata') {
-            fileMeta = msg;
-            receivedBuffers = [];
-            receivedSize = 0;
-            expectedSize = msg.size;
-            document.getElementById('receiveStatus').textContent = `Recibiendo: ${msg.name}`;
-        }
-    } else {
-        // Binary chunk
-        receivedBuffers.push(data);
-        receivedSize += data.byteLength;
+    // Handshake handling
+    if (data && data.type === 'ping') {
+        console.log("Received PING, sending PONG");
+        conn.send({ type: 'pong' });
+        return;
+    }
+    if (data && data.type === 'pong') {
+        console.log("Received PONG, starting transfer");
+        if(conn.handshakeInterval) clearInterval(conn.handshakeInterval);
+        sendFile();
+        return;
+    }
+
+    if (data && data.type === 'metadata') {
+        // Clear any handshake intervals on receiver side if they existed
+        fileMeta = data;
+        receivedBuffers = [];
+        receivedSize = 0;
+        expectedSize = data.size;
+        lastReceiverUpdate = 0;
+        document.getElementById('receiveStatus').textContent = `Recibiendo: ${data.name}`;
         
-        const percent = (receivedSize / expectedSize) * 100;
-        document.getElementById('receiveProgress').value = percent;
+        // Force UI transition to receiving state
+        document.getElementById('receiverStep2').classList.add('hidden');
+        document.getElementById('receiverStep3').classList.remove('hidden');
+    } else {
+        // Binary chunk handling
+        let chunk = data;
+        
+        // PeerJS BinaryPack usually returns ArrayBuffer or Uint8Array directly
+        // but let's be safe against wrapped objects just in case
+        if (data && data._data && (data.constructor === Object || data._data instanceof Uint8Array)) {
+             chunk = data._data;
+        }
+
+        // Validate chunk is binary-like
+        if (chunk instanceof ArrayBuffer || ArrayBuffer.isView(chunk) || chunk instanceof Blob) {
+            receivedBuffers.push(chunk);
+            receivedSize += chunk.byteLength || chunk.size || 0;
+        } else {
+            // If we receive an empty object or something else, it might be a serialization artifact
+            // Log it but don't break
+            if (Object.keys(chunk).length === 0) {
+                 // Ignore empty objects (keepalive or serialization error)
+                 return;
+            }
+            console.warn("Received non-binary chunk:", data);
+        }
+        
+        // Throttle UI updates
+        const now = Date.now();
+        if (now - lastReceiverUpdate > 100 || receivedSize >= expectedSize) {
+            const percent = (receivedSize / expectedSize) * 100;
+            document.getElementById('receiveProgress').value = Math.min(percent, 100);
+            lastReceiverUpdate = now;
+        }
 
         if (receivedSize >= expectedSize) {
             finishReceive();
@@ -418,7 +496,7 @@ function generateQR(containerId, text) {
         height: 180,
         colorDark : "#000000",
         colorLight : "#ffffff",
-        correctLevel : QRCode.CorrectLevel.L
+        correctLevel : QRCode.CorrectLevel.M
     });
 }
 
@@ -476,10 +554,14 @@ function tickScanner() {
 
         if (code) {
             // Found QR
-            document.getElementById('offerCodeInput').value = code.data;
-            document.getElementById('processOfferBtn').disabled = false;
-            stopQRScanner();
-            // Optional: Auto process? Better to let user click process.
+            const id = code.data.trim().toUpperCase();
+            if(id.length >= 4) { // Basic validation
+                document.getElementById('offerCodeInput').value = id;
+                document.getElementById('connectBtn').disabled = false;
+                stopQRScanner();
+                // Optional: Auto connect
+                connectToPeer();
+            }
         }
     }
     requestAnimationFrame(tickScanner);

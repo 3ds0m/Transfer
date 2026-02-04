@@ -44,7 +44,8 @@ const translations = {
         warningMsg: "⚠️ Importante: No cierres esta página hasta que el archivo haya sido recibido completamente.",
         fileReceivedSender: "Archivo recibido por el destinatario. Esperando descarga...",
         fileDownloadedSender: "¡Archivo descargado exitosamente!",
-        safeToClose: "✅ Archivo entregado y descargado. Es seguro cerrar esta página."
+        safeToClose: "✅ Archivo entregado y descargado. Es seguro cerrar esta página.",
+        waitingPeer: "Conectado. Esperando al otro dispositivo..."
     },
     en: {
         title: "Fast P2P Transfer",
@@ -78,7 +79,8 @@ const translations = {
         warningMsg: "⚠️ Important: Do not close this page until the file has been fully received.",
         fileReceivedSender: "File received by recipient. Waiting for download...",
         fileDownloadedSender: "File downloaded successfully!",
-        safeToClose: "✅ File delivered and downloaded. It is safe to close this page."
+        safeToClose: "✅ File delivered and downloaded. It is safe to close this page.",
+        waitingPeer: "Connected. Waiting for peer..."
     }
 };
 
@@ -351,7 +353,7 @@ function setupConnection(connection, isSender) {
     if(isSender) {
         document.getElementById('senderStep2').classList.add('hidden');
         document.getElementById('senderStep3').classList.remove('hidden');
-        document.getElementById('sendStatus').textContent = "Conectado. Verificando canal...";
+        document.getElementById('sendStatus').textContent = t.waitingPeer;
         
         // Retry Handshake loop
         let attempts = 0;
@@ -380,16 +382,29 @@ function setupConnection(connection, isSender) {
         conn.handshakeInterval = handshakeInterval;
         
     } else {
-        document.getElementById('receiverStep1').classList.add('hidden');
+        // Fix: Update status to remove spinner and show connected state
+        const statusContainer = document.querySelector('#receiverStep2 .status-msg');
+        if(statusContainer) {
+            statusContainer.innerHTML = '✅ ' + t.connEstablished;
+        }
+        // document.getElementById('receiverStep1').classList.add('hidden'); // Already hidden?
         document.getElementById('receiverStep2').classList.remove('hidden');
-        document.getElementById('receiveStatus').textContent = t.connEstablished;
+        // We stay in Step 2 until metadata is received
     }
+}
+
+function formatTime(seconds) {
+    if(!isFinite(seconds) || seconds < 0) return "--:--";
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 async function sendFile() {
     if(!fileToSend || !conn) return;
     
-    document.getElementById('sendStatus').textContent = translations[currentLang].sending;
+    const t = translations[currentLang];
+    document.getElementById('sendStatus').textContent = t.sending;
 
     // 1. Send Metadata
     const meta = {
@@ -407,6 +422,7 @@ async function sendFile() {
     // Performance metrics
     let lastUiUpdate = 0;
     const updateInterval = 100; // Update UI max every 100ms
+    const startTime = Date.now();
     
     // Buffer limits
     const MAX_BUFFERED_AMOUNT = 16 * 1024 * 1024; // 16MB
@@ -438,6 +454,18 @@ async function sendFile() {
         if (now - lastUiUpdate > updateInterval || i === totalChunks - 1) {
             const percent = (offset / fileToSend.size) * 100;
             document.getElementById('sendProgress').value = Math.min(percent, 100);
+            
+            // Calculate stats
+            const elapsed = (now - startTime) / 1000; // seconds
+            if (elapsed > 0) {
+                const speed = offset / elapsed; // bytes/sec
+                const remaining = fileToSend.size - offset;
+                const eta = remaining / speed;
+                
+                document.getElementById('senderStats').textContent = 
+                    `${Math.round(percent)}% | ${formatSize(speed)}/s | ETA: ${formatTime(eta)}`;
+            }
+
             lastUiUpdate = now;
             
             // Yield to main thread to keep UI responsive
@@ -445,10 +473,12 @@ async function sendFile() {
         }
     }
     
+    document.getElementById('senderStats').textContent = "100%";
     document.getElementById('sendStatus').textContent = translations[currentLang].transferComplete;
 }
 
 let lastReceiverUpdate = 0;
+let receiveStartTime = 0;
 
 function handleMessage(data) {
     console.log("Received data:", data);
@@ -473,6 +503,7 @@ function handleMessage(data) {
         receivedSize = 0;
         expectedSize = data.size;
         lastReceiverUpdate = 0;
+        receiveStartTime = Date.now();
         document.getElementById('receiveStatus').textContent = `Recibiendo: ${data.name}`;
         
         // Force UI transition to receiving state
@@ -518,10 +549,23 @@ function handleMessage(data) {
         if (now - lastReceiverUpdate > 100 || receivedSize >= expectedSize) {
             const percent = (receivedSize / expectedSize) * 100;
             document.getElementById('receiveProgress').value = Math.min(percent, 100);
+            
+            // Calculate stats
+            const elapsed = (now - receiveStartTime) / 1000;
+            if (elapsed > 0) {
+                const speed = receivedSize / elapsed;
+                const remaining = expectedSize - receivedSize;
+                const eta = remaining / speed;
+                
+                document.getElementById('receiverStats').textContent = 
+                    `${Math.round(percent)}% | ${formatSize(speed)}/s | ETA: ${formatTime(eta)}`;
+            }
+
             lastReceiverUpdate = now;
         }
 
         if (receivedSize >= expectedSize) {
+            document.getElementById('receiverStats').textContent = "100%";
             finishReceive();
         }
     }

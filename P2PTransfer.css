@@ -198,6 +198,21 @@ progress::-webkit-progress-value {
     transition: width 0.3s ease;
 }
 
+.stats-text {
+    font-size: 13px;
+    color: var(--secondary-text);
+    text-align: center;
+    margin-top: -15px;
+    margin-bottom: 15px;
+    font-variant-numeric: tabular-nums;
+}
+
+.warning-msg.success {
+    background-color: rgba(52, 199, 89, 0.1);
+    color: var(--success-color);
+    border-color: rgba(52, 199, 89, 0.2);
+}
+
 .status-msg {
     text-align: center;
     font-size: 14px;

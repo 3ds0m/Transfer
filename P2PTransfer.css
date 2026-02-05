@@ -33,12 +33,19 @@ body {
     font-family: var(--font-family);
     background-color: var(--bg-color);
     color: var(--text-color);
-    display: flex;
-    justify-content: center;
-    align-items: center;
     min-height: 100vh;
     padding: 20px;
     -webkit-font-smoothing: antialiased;
+}
+
+.app-container {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 20px;
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
 }
 
 .card {
@@ -52,6 +59,7 @@ body {
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
     overflow: hidden;
+    flex-shrink: 0;
 }
 
 header {
@@ -128,7 +136,7 @@ select {
     cursor: pointer;
 }
 
-#themeToggle {
+#themeToggle, #chatToggleBtn {
     background: none;
     border: 1px solid var(--border-color);
     border-radius: 50%;
@@ -141,6 +149,10 @@ select {
     font-size: 18px;
     cursor: pointer;
     color: var(--text-color);
+}
+
+#chatToggleBtn:hover, #themeToggle:hover {
+    background-color: rgba(128,128,128,0.1);
 }
 
 .code-section {
@@ -191,14 +203,321 @@ canvas, #qrScanner {
 #qrSenderCanvas, #qrAnswerCanvas {
     background-color: white; /* QR always readable */
     padding: 10px;
-}
-
 progress {
     width: 100%;
     height: 8px;
     border-radius: 4px;
     margin: 20px 0;
-    appearance: none;
+}
+
+/* Chat Styles - Clean & Distinct */
+.chat-container {
+    width: 350px;
+    height: 600px;
+    background: var(--bg-color); /* Restored to app background */
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+    transition: all 0.4s cubic-bezier(0.19, 1, 0.22, 1);
+    opacity: 1;
+    margin-left: 0;
+    position: relative;
+}
+
+[data-theme="dark"] .chat-container {
+    background: var(--bg-color);
+}
+
+.chat-container.collapsed {
+    width: 0;
+    opacity: 0;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    pointer-events: none;
+}
+
+.chat-container.hidden {
+    display: none;
+}
+
+@media (max-width: 850px) {
+    .app-container {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .chat-container {
+        width: 100%;
+        max-width: 500px;
+        margin-left: 0;
+    }
+
+    .chat-container.collapsed {
+        width: 100%;
+        height: 0;
+        opacity: 0;
+    }
+}
+
+.chat-header {
+    padding: 10px 16px;
+    background: rgba(128, 128, 128, 0.05);
+    border-bottom: 1px solid var(--border-color);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 16px;
+    color: var(--text-color);
+    height: 60px;
+    flex-shrink: 0;
+}
+
+[data-theme="dark"] .chat-header {
+    background: rgba(255, 255, 255, 0.05);
+    color: var(--text-color);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.chat-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+    background-color: var(--card-bg); /* Clean card background */
+}
+
+.chat-history {
+    flex: 1;
+    overflow-y: auto;
+    padding: 15px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.chat-message-wrapper {
+    display: flex;
+    flex-direction: column;
+    max-width: 80%;
+    margin-bottom: 16px;
+}
+
+.chat-message-wrapper.sent {
+    align-self: flex-end;
+    align-items: flex-end;
+}
+
+.chat-message-wrapper.received {
+    align-self: flex-start;
+    align-items: flex-start;
+}
+
+.chat-message-label {
+    font-size: 13px;
+    font-weight: bold;
+    margin-bottom: 6px;
+    margin-left: 4px;
+    margin-right: 4px;
+    opacity: 0.9;
+}
+
+/* Distinct label colors */
+.chat-message-wrapper.sent .chat-message-label {
+    color: var(--accent-color);
+    text-align: right;
+}
+
+.chat-message-wrapper.received .chat-message-label {
+    color: var(--secondary-text);
+    text-align: left;
+}
+
+[data-theme="dark"] .chat-message-wrapper.sent .chat-message-label {
+    color: #4da3ff;
+}
+
+[data-theme="dark"] .chat-message-wrapper.received .chat-message-label {
+    color: #98989d;
+}
+
+.chat-message {
+    padding: 10px 16px;
+    border-radius: 18px;
+    font-size: 15px;
+    line-height: 1.4;
+    color: var(--text-color);
+    position: relative;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
+    word-wrap: break-word;
+    display: flex;
+    flex-wrap: wrap;
+    font-family: var(--font-family);
+    margin-bottom: 4px;
+    max-width: 100%;
+    transition: transform 0.2s ease;
+}
+
+.chat-message:hover {
+    transform: scale(1.01);
+}
+
+[data-theme="dark"] .chat-message {
+    color: white;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.3);
+}
+
+/* Sent messages: Blue/Accent bubble */
+.chat-message.sent {
+    background-color: var(--accent-color);
+    color: white;
+    border-bottom-right-radius: 4px; /* Subtle visual cue for flow */
+}
+
+[data-theme="dark"] .chat-message.sent {
+    background-color: var(--accent-color);
+    color: white;
+}
+
+/* Received messages: Grey bubble */
+.chat-message.received {
+    background-color: #e9e9eb; /* iOS light gray */
+    color: black;
+    border-bottom-left-radius: 4px;
+}
+
+[data-theme="dark"] .chat-message.received {
+    background-color: #3a3a3c;
+    color: white;
+}
+
+.message-content {
+    width: 100%;
+}
+
+/* Remove Meta/Time styles as requested */
+.message-meta, .message-time, .message-status {
+    display: none;
+}
+
+.chat-input-area {
+    padding: 12px;
+    background: var(--card-bg);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    min-height: 60px;
+}
+
+[data-theme="dark"] .chat-input-area {
+    background: var(--card-bg);
+    border-color: var(--border-color);
+}
+
+.chat-input-area input {
+    margin-bottom: 0;
+    border-radius: 20px;
+    padding: 10px 15px;
+    border: 1px solid var(--border-color);
+    background: rgba(128,128,128,0.05);
+    font-size: 14px;
+    flex: 1;
+}
+
+[data-theme="dark"] .chat-input-area input {
+    background: rgba(255,255,255,0.05);
+    color: white;
+    border-color: var(--border-color);
+}
+
+.chat-input-area input:focus {
+    background: var(--card-bg);
+    border-color: var(--accent-color);
+}
+
+[data-theme="dark"] .chat-input-area input:focus {
+    background: #000;
+}
+
+.chat-input-area button {
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border-radius: 50%;
+    margin-bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background-color: var(--accent-color);
+    color: white;
+    flex-shrink: 0;
+    font-size: 16px;
+    border: none;
+    transition: transform 0.2s;
+}
+
+[data-theme="dark"] .chat-input-area button {
+    color: white;
+}
+
+.chat-input-area button:hover {
+    background-color: var(--accent-hover);
+    transform: scale(1.05);
+}
+
+.floating-chat-btn {
+    display: none !important;
+    /*
+    position: fixed;
+    bottom: 20px;
+    right: 20px;
+    width: 60px;
+    height: 60px;
+    border-radius: 30px;
+    background-color: var(--accent-color);
+    color: white;
+    font-size: 24px;
+    box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
+    z-index: 999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    */
+}
+
+.floating-chat-btn:hover {
+    transform: scale(1.1);
+}
+
+.floating-chat-btn.hidden {
+    display: none;
+}
+
+.notification-badge {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background-color: var(--error-color);
+    color: white;
+    font-size: 12px;
+    font-weight: bold;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px solid var(--bg-color);
+}   appearance: none;
 }
 
 progress::-webkit-progress-bar {
@@ -351,6 +670,12 @@ progress::-webkit-progress-value {
     vertical-align: middle;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.2); }
+    100% { transform: scale(1); }
+}
 
 .warning-msg.success {
     background-color: rgba(52, 199, 89, 0.1);

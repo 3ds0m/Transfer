@@ -10,90 +10,111 @@
     <link rel="stylesheet" href="P2PTransfer.css">
 </head>
 <body>
-    <div class="card">
-        <header>
-            <select id="langSelect">
-                <option value="es">Español</option>
-                <option value="en">English</option>
-            </select>
-            <button id="themeToggle">🌙</button>
-        </header>
-
-        <!-- Pantalla principal -->
-        <div id="mainScreen">
-            <h1 data-i18n="title">Transferencia P2P Segura</h1>
-            <p style="text-align: center; color: var(--secondary-text); margin-bottom: 30px;" data-i18n="subtitle">Transfiere archivos directamente entre dispositivos sin servidores.</p>
-            <button id="senderBtn" class="btn-primary btn-send" data-i18n="send">Enviar Archivo</button>
-            <button id="receiverBtn" class="btn-primary btn-receive" data-i18n="receive">Recibir Archivo</button>
-        </div>
-
-        <!-- Panel Enviar -->
-        <div id="senderPanel" class="hidden">
-            <button class="back-btn" onclick="showMain()"><span style="margin-right:5px">←</span> <span data-i18n="back">Volver</span></button>
-            <h2 data-i18n="senderMode" style="margin-bottom: 20px; font-size: 18px;">Modo: Enviar</h2>
-            
-            <div id="senderStep1">
-                <div class="upload-zone" id="uploadZone">
-                    <div class="upload-icon">📤</div>
-                    <div class="upload-text" data-i18n="dragDropText">Arrastra y suelta un archivo aquí o</div>
-                    <button class="btn-primary upload-btn" id="customFileBtn" data-i18n="selectFileBtn">Seleccionar archivo</button>
-                    <input type="file" id="fileInput" style="display: none;">
+    <div class="app-container">
+        <div class="card">
+            <header>
+                <select id="langSelect">
+                    <option value="es">Español</option>
+                    <option value="en">English</option>
+                </select>
+                <div style="display: flex; gap: 10px; align-items: center;">
+                    <button id="chatToggleBtn" class="hidden" title="Chat">💬</button>
+                    <button id="themeToggle">🌙</button>
                 </div>
-                <div id="fileInfo" class="status-msg"></div>
+            </header>
+
+            <!-- Pantalla principal -->
+            <div id="mainScreen">
+                <h1 data-i18n="title">Transferencia P2P Segura</h1>
+                <p style="text-align: center; color: var(--secondary-text); margin-bottom: 30px;" data-i18n="subtitle">Transfiere archivos directamente entre dispositivos sin servidores.</p>
+                <button id="senderBtn" class="btn-primary btn-send" data-i18n="send">Enviar Archivo</button>
+                <button id="receiverBtn" class="btn-primary btn-receive" data-i18n="receive">Recibir Archivo</button>
             </div>
 
-            <div id="senderStep2" class="hidden">
-                <div class="code-section">
-                    <p data-i18n="step1Desc" style="margin-bottom:10px; font-size:13px; color:var(--secondary-text)">1. Tu ID de conexión (Compártelo):</p>
-                    <div id="qrSenderContainer"></div>
-                    <div id="generatingCodeSpinner" class="status-msg" style="display:none; margin: 20px 0;">
-                        <span class="spinner"></span> <span data-i18n="generating">Conectando al servidor...</span>
+            <!-- Panel Enviar -->
+            <div id="senderPanel" class="hidden">
+                <button class="back-btn" onclick="showMain()"><span style="margin-right:5px">←</span> <span data-i18n="back">Volver</span></button>
+                <h2 data-i18n="senderMode" style="margin-bottom: 20px; font-size: 18px;">Modo: Enviar</h2>
+                
+                <div id="senderStep1">
+                    <div class="upload-zone" id="uploadZone">
+                        <div class="upload-icon">📤</div>
+                        <div class="upload-text" data-i18n="dragDropText">Arrastra y suelta un archivo aquí o</div>
+                        <button class="btn-primary upload-btn" id="customFileBtn" data-i18n="selectFileBtn">Seleccionar archivo</button>
+                        <input type="file" id="fileInput" style="display: none;">
                     </div>
-                    <input id="offerCode" readonly onclick="this.select()" style="text-align:center; font-size: 24px; letter-spacing: 2px; font-weight: bold; width: 200px;">
-                    <button id="copyOfferBtn" class="btn-secondary" data-i18n="copy">Copiar</button>
-                    <p style="margin-top:10px; font-size:12px; color:var(--secondary-text)" data-i18n="step2Desc">Esperando a que el receptor se conecte...</p>
+                    <div id="fileInfo" class="status-msg"></div>
+                </div>
+
+                <div id="senderStep2" class="hidden">
+                    <div class="code-section">
+                        <p data-i18n="step1Desc" style="margin-bottom:10px; font-size:13px; color:var(--secondary-text)">1. Tu ID de conexión (Compártelo):</p>
+                        <div id="qrSenderContainer"></div>
+                        <div id="generatingCodeSpinner" class="status-msg" style="display:none; margin: 20px 0;">
+                            <span class="spinner"></span> <span data-i18n="generating">Conectando al servidor...</span>
+                        </div>
+                        <input id="offerCode" readonly onclick="this.select()" style="text-align:center; font-size: 24px; letter-spacing: 2px; font-weight: bold; width: 200px;">
+                        <button id="copyOfferBtn" class="btn-secondary" data-i18n="copy">Copiar</button>
+                        <p style="margin-top:10px; font-size:12px; color:var(--secondary-text)" data-i18n="step2Desc">Esperando a que el receptor se conecte...</p>
+                    </div>
+                </div>
+
+                <div id="senderStep3" class="hidden">
+                     <p data-i18n="sending" style="text-align:center; font-weight:500;">Enviando...</p>
+                     <progress id="sendProgress" value="0" max="100"></progress>
+                     <div id="senderStats" class="stats-text"></div>
+                     <div id="sendStatus" class="status-msg"></div>
+                     <div id="warningMsg" class="warning-msg" data-i18n="warningMsg">⚠️ Importante: No cierres esta página hasta que el archivo haya sido recibido completamente.</div>
                 </div>
             </div>
 
-            <div id="senderStep3" class="hidden">
-                 <p data-i18n="sending" style="text-align:center; font-weight:500;">Enviando...</p>
-                 <progress id="sendProgress" value="0" max="100"></progress>
-                 <div id="senderStats" class="stats-text"></div>
-                 <div id="sendStatus" class="status-msg"></div>
-                 <div id="warningMsg" class="warning-msg" data-i18n="warningMsg">⚠️ Importante: No cierres esta página hasta que el archivo haya sido recibido completamente.</div>
+            <!-- Panel Recibir -->
+            <div id="receiverPanel" class="hidden">
+                <button class="back-btn" onclick="showMain()"><span style="margin-right:5px">←</span> <span data-i18n="back">Volver</span></button>
+                <h2 data-i18n="receiverMode" style="margin-bottom: 20px; font-size: 18px;">Modo: Recibir</h2>
+
+                <div id="receiverStep1">
+                    <div class="code-section">
+                        <p data-i18n="stepRec1Desc" style="margin-bottom:10px; font-size:13px; color:var(--secondary-text)">1. Ingresa el ID del emisor o escanea QR:</p>
+                        <button id="scanQrBtn" class="btn-secondary" style="margin-bottom:10px;" data-i18n="scanQr">Escanear QR</button>
+                        <video id="qrScanner" class="hidden" playsinline></video>
+                        <input id="offerCodeInput" placeholder="Ej: X9Y2Z1" style="text-align:center; font-size: 18px; letter-spacing: 1px; font-weight: bold; text-transform: uppercase;">
+                        <button id="connectBtn" class="btn-primary" data-i18n="connect" disabled>Conectar</button>
+                    </div>
+                </div>
+
+                <div id="receiverStep2" class="hidden">
+                    <div class="status-msg">
+                        <span class="spinner"></span> <span data-i18n="waitingForConnection">Conectando...</span>
+                    </div>
+                </div>
+
+                <div id="receiverStep3" class="hidden">
+                    <p data-i18n="receiving" style="text-align:center; font-weight:500;">Recibiendo...</p>
+                    <progress id="receiveProgress" value="0" max="100"></progress>
+                    <div id="receiverStats" class="stats-text"></div>
+                    <div id="receiveStatus" class="status-msg"></div>
+                    <a id="downloadLink" class="hidden" download></a>
+                </div>
             </div>
         </div>
 
-        <!-- Panel Recibir -->
-        <div id="receiverPanel" class="hidden">
-            <button class="back-btn" onclick="showMain()"><span style="margin-right:5px">←</span> <span data-i18n="back">Volver</span></button>
-            <h2 data-i18n="receiverMode" style="margin-bottom: 20px; font-size: 18px;">Modo: Recibir</h2>
-
-            <div id="receiverStep1">
-                <div class="code-section">
-                    <p data-i18n="stepRec1Desc" style="margin-bottom:10px; font-size:13px; color:var(--secondary-text)">1. Ingresa el ID del emisor o escanea QR:</p>
-                    <button id="scanQrBtn" class="btn-secondary" style="margin-bottom:10px;" data-i18n="scanQr">Escanear QR</button>
-                    <video id="qrScanner" class="hidden" playsinline></video>
-                    <input id="offerCodeInput" placeholder="Ej: X9Y2Z1" style="text-align:center; font-size: 18px; letter-spacing: 1px; font-weight: bold; text-transform: uppercase;">
-                    <button id="connectBtn" class="btn-primary" data-i18n="connect" disabled>Conectar</button>
-                </div>
+        <div id="chatContainer" class="chat-container collapsed hidden">
+            <div class="chat-header" onclick="toggleChat()">
+                <span data-i18n="chatTitle">Chat</span>
+                <span id="chatToggleIcon">▼</span>
             </div>
-
-            <div id="receiverStep2" class="hidden">
-                <div class="status-msg">
-                    <span class="spinner"></span> <span data-i18n="waitingForConnection">Conectando...</span>
+            <div class="chat-body">
+                <div id="chatHistory" class="chat-history"></div>
+                <div class="chat-input-area">
+                    <input type="text" id="chatInput" placeholder="Escribe un mensaje..." data-i18n="chatPlaceholder">
+                    <button id="sendChatBtn">➤</button>
                 </div>
-            </div>
-
-            <div id="receiverStep3" class="hidden">
-                <p data-i18n="receiving" style="text-align:center; font-weight:500;">Recibiendo...</p>
-                <progress id="receiveProgress" value="0" max="100"></progress>
-                <div id="receiverStats" class="stats-text"></div>
-                <div id="receiveStatus" class="status-msg"></div>
-                <a id="downloadLink" class="hidden" download></a>
             </div>
         </div>
     </div>
+    
+    <button id="floatingChatBtn" class="floating-chat-btn hidden" onclick="toggleChat()">💬</button>
 
 <script src="P2PTransfer.js"></script>
 </body>

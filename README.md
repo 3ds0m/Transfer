@@ -86,7 +86,7 @@ Este proyecto está construido sobre el estándar del futuro de la web:
 - [x] Soporte Móvil y QR
 - [x] Estadísticas en tiempo real
 - [ ] Transferencia de múltiples archivos (Batch)
-- [ ] Chat de texto encriptado durante la transferencia
+- [x] Chat de texto encriptado durante la transferencia
 - [ ] Versión Desktop (Electron)
 
 ---

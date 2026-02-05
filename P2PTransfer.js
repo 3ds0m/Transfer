@@ -46,7 +46,9 @@ const translations = {
         fileDownloadedSender: "¡Archivo descargado exitosamente!",
         safeToClose: "✅ Archivo entregado y descargado. Es seguro cerrar esta página.",
         waitingPeer: "Conectado. Esperando al otro dispositivo...",
-        verifying: "Verificando recepción..."
+        verifying: "Verificando recepción...",
+        chatTitle: "Chat",
+        chatPlaceholder: "Escribe un mensaje..."
     },
     en: {
         title: "Fast P2P Transfer",
@@ -82,7 +84,9 @@ const translations = {
         fileDownloadedSender: "File downloaded successfully!",
         safeToClose: "✅ File delivered and downloaded. It is safe to close this page.",
         waitingPeer: "Connected. Waiting for peer...",
-        verifying: "Verifying receipt..."
+        verifying: "Verifying receipt...",
+        chatTitle: "Chat",
+        chatPlaceholder: "Type a message..."
     }
 };
 
@@ -119,6 +123,13 @@ function init() {
         document.getElementById('connectBtn').disabled = e.target.value.trim().length < 4;
     };
     document.getElementById('connectBtn').onclick = connectToPeer;
+
+    // Chat Listeners
+    document.getElementById('sendChatBtn').onclick = sendChatMessage;
+    document.getElementById('chatInput').addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') sendChatMessage();
+    });
+    document.getElementById('chatToggleBtn').onclick = toggleChat;
 
     setLanguage('es');
 }
@@ -247,6 +258,13 @@ function resetState() {
     document.getElementById('receiveStatus').textContent = '';
 
     stopQRScanner();
+    
+    // Reset Chat
+    document.getElementById('chatContainer').classList.add('hidden', 'collapsed');
+    document.getElementById('chatToggleBtn').classList.add('hidden');
+    document.getElementById('chatHistory').innerHTML = '';
+    lastMessageRole = null;
+    lastMessageWrapper = null;
 }
 
 function copyToClipboard(elementId) {
@@ -259,6 +277,7 @@ function copyToClipboard(elementId) {
 // --- Sender Logic ---
 
 function startSenderFlow() {
+    currentRole = 'sender';
     document.getElementById('mainScreen').classList.add('hidden');
     document.getElementById('senderPanel').classList.remove('hidden');
 }
@@ -310,6 +329,7 @@ function handleDrop(e) {
 // --- Receiver Logic ---
 
 function startReceiverFlow() {
+    currentRole = 'receiver';
     document.getElementById('mainScreen').classList.add('hidden');
     document.getElementById('receiverPanel').classList.remove('hidden');
     initializePeer(false); // Init peer so we can connect
@@ -356,6 +376,11 @@ function setupConnection(connection, isSender) {
         alert("Connection closed");
         showMain();
     });
+
+    // Show Chat
+    document.getElementById('chatContainer').classList.remove('hidden', 'collapsed');
+    document.getElementById('chatToggleBtn').classList.remove('hidden');
+    document.getElementById('chatToggleIcon').textContent = '▼'; // Ensure icon matches expanded state
 
     const t = translations[currentLang];
     
@@ -535,6 +560,14 @@ function handleMessage(data) {
         // Force UI transition to receiving state
         document.getElementById('receiverStep2').classList.add('hidden');
         document.getElementById('receiverStep3').classList.remove('hidden');
+    } else if (data && data.type === 'chat') {
+        addMessageToChat(data.message, 'received', data.role);
+        if (document.getElementById('chatContainer').classList.contains('collapsed')) {
+             const btn = document.getElementById('chatToggleBtn');
+             btn.style.animation = 'none';
+             btn.offsetHeight; /* trigger reflow */
+             btn.style.animation = 'pulse 1s';
+        }
     } else if (data && data.type === 'transfer-complete') {
         const t = translations[currentLang];
         document.getElementById('sendProgress').value = 100;
@@ -715,6 +748,110 @@ function formatSize(bytes) {
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// --- Chat Logic ---
+
+let lastMessageRole = null;
+let lastMessageWrapper = null;
+
+function toggleChat() {
+    const chat = document.getElementById('chatContainer');
+    // Ensure hidden class is removed if present so we can actually see the transition
+    if (chat.classList.contains('hidden')) {
+        chat.classList.remove('hidden');
+        chat.classList.remove('collapsed');
+    } else {
+        chat.classList.toggle('collapsed');
+    }
+    
+    // Update internal icon if visible
+    const icon = document.getElementById('chatToggleIcon');
+    if(icon) {
+        icon.textContent = chat.classList.contains('collapsed') ? '▲' : '▼';
+    }
+    
+    // Update header button state for visual feedback
+    const btn = document.getElementById('chatToggleBtn');
+    if(btn) {
+        if(chat.classList.contains('collapsed')) {
+            btn.style.opacity = '0.5';
+        } else {
+            btn.style.opacity = '1';
+        }
+    }
+}
+
+function sendChatMessage() {
+    const input = document.getElementById('chatInput');
+    const message = input.value.trim();
+    if (!message || !conn || !conn.open) return;
+
+    // Send to peer
+    conn.send({ type: 'chat', message: message, role: currentRole });
+
+    // Display locally
+    addMessageToChat(message, 'sent', currentRole);
+    input.value = '';
+}
+
+function addMessageToChat(message, type, role) {
+    const history = document.getElementById('chatHistory');
+    
+    // Check for grouping
+    // We group if: same role AND same type (sent/received) AND last wrapper exists
+    const isConsecutive = (lastMessageRole === role) && lastMessageWrapper && lastMessageWrapper.classList.contains(type);
+
+    if (isConsecutive) {
+        // Append to existing group
+        const msgDiv = createMessageElement(message, type);
+        lastMessageWrapper.appendChild(msgDiv);
+    } else {
+        // Create new group
+        const wrapper = document.createElement('div');
+        wrapper.className = `chat-message-wrapper ${type}`;
+
+        // Label logic: for both messages to ensure clarity
+        const label = document.createElement('div');
+        label.className = 'chat-message-label';
+        
+        let roleLabel = 'Desconocido';
+        if (role === 'sender') roleLabel = 'Emisor';
+        else if (role === 'receiver') roleLabel = 'Receptor';
+        
+        // If it's sent by me (locally 'sent'), I am the 'currentRole'.
+        // If I am sender, label is Emisor. If I am receiver, label is Receptor.
+        // Wait, if I am sender, I want to see "Tú (Emisor)" or just "Emisor"?
+        // The user said "cada mensaje incluya indicadores visuales claros de quién lo envió".
+        // Let's stick to "Emisor" and "Receptor" as requested originally.
+        
+        label.textContent = roleLabel;
+        wrapper.appendChild(label);
+        
+        const msgDiv = createMessageElement(message, type);
+        wrapper.appendChild(msgDiv);
+        
+        history.appendChild(wrapper);
+        
+        // Update state
+        lastMessageWrapper = wrapper;
+        lastMessageRole = role;
+    }
+    
+    history.scrollTop = history.scrollHeight;
+}
+
+function createMessageElement(message, type) {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `chat-message ${type}`;
+    
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'message-content';
+    contentDiv.textContent = message;
+    
+    msgDiv.appendChild(contentDiv);
+    
+    return msgDiv;
 }
 
 // Initialize

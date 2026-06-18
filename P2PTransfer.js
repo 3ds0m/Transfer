@@ -1,5 +1,5 @@
 // --- Configuración y Estado ---
-const CHUNK_SIZE = 64 * 1024; // 64KB for better throughput
+const CHUNK_SIZE = 16 * 1024; // 64KB for better throughput
 let peer;
 let conn;
 let myId = '';

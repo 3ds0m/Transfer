@@ -1,5 +1,5 @@
 // --- Configuración y Estado ---
-const CHUNK_SIZE = 16 * 1024; // 64KB for better throughput
+const CHUNK_SIZE = 16 * 1024; // 16KB chunks for reliable transfer
 let peer;
 let conn;
 let myId = '';
@@ -9,6 +9,8 @@ let receivedSize = 0;
 let expectedSize = 0;
 let fileMeta = {};
 let isScanning = false;
+let currentRole = ''; // Fixed: declare currentRole variable
+let transferTimeout = null;
 
 // --- Traducciones ---
 const translations = {
@@ -120,7 +122,6 @@ function init() {
     document.getElementById('scanQrBtn').onclick = toggleQRScanner;
     document.getElementById('offerCodeInput').oninput = (e) => {
         e.target.value = e.target.value.toUpperCase(); // Force uppercase
-        document.getElementById('connectBtn').disabled = e.target.value.trim().length < 4;
     };
     document.getElementById('connectBtn').onclick = connectToPeer;
 
@@ -232,10 +233,14 @@ function showMain() {
 function resetState() {
     if(peer) { peer.destroy(); peer = null; }
     if(conn) { conn.close(); conn = null; }
+    if(transferTimeout) { clearTimeout(transferTimeout); transferTimeout = null; }
     fileToSend = null;
     receivedBuffers = [];
     receivedSize = 0;
+    expectedSize = 0;
+    fileMeta = {};
     isScanning = false;
+    currentRole = '';
     
     // Reset UI
     document.getElementById('senderStep1').classList.remove('hidden');
@@ -337,35 +342,75 @@ function startReceiverFlow() {
 
 function connectToPeer() {
     const targetId = document.getElementById('offerCodeInput').value.trim().toUpperCase();
-    if(!targetId) return;
+    if (targetId.length < 4) {
+        alert(currentLang === 'es' ? "Por favor, introduce un código de conexión válido (mínimo 4 caracteres)." : "Please enter a valid connection code (minimum 4 characters).");
+        return;
+    }
 
     if (!peer || peer.destroyed) initializePeer(false);
 
-    // Use default serialization (BinaryPack) which handles both JSON and ArrayBuffer correctly
-    conn = peer.connect(targetId);
+    // Show connecting status immediately and hide input step
+    document.getElementById('receiverStep1').classList.add('hidden');
+    document.getElementById('receiverStep2').classList.remove('hidden');
+    
+    // Reset status container to connecting spinner
+    const statusContainer = document.querySelector('#receiverStep2 .status-msg');
+    if (statusContainer) {
+        const t = translations[currentLang];
+        statusContainer.innerHTML = `<span class="spinner"></span> <span>${t.waitingForConnection}</span>`;
+    }
+
+    // Use raw binary and stringified JSON for stability and performance
+    conn = peer.connect(targetId, { serialization: 'raw' });
     
     let isConnected = false;
+
+    // Set connection timeout (10 seconds)
+    const connectionTimeout = setTimeout(() => {
+        if (!isConnected) {
+            alert(currentLang === 'es' ? "No se pudo establecer la conexión. Verifica el código e intenta de nuevo." : "Could not establish connection. Please check the code and try again.");
+            if (conn) { conn.close(); conn = null; }
+            // Go back to step 1
+            document.getElementById('receiverStep2').classList.add('hidden');
+            document.getElementById('receiverStep1').classList.remove('hidden');
+        }
+    }, 10000);
 
     conn.on('open', () => {
         if (isConnected) return;
         isConnected = true;
+        clearTimeout(connectionTimeout);
         setupConnection(conn, false);
     });
     
     conn.on('error', (err) => {
+        clearTimeout(connectionTimeout);
         alert("Error connecting to peer: " + err);
+        // Go back to step 1
+        document.getElementById('receiverStep2').classList.add('hidden');
+        document.getElementById('receiverStep1').classList.remove('hidden');
     });
     
     // Force open check after a timeout
     setTimeout(() => {
         if(conn && conn.open && !isConnected) {
             isConnected = true;
+            clearTimeout(connectionTimeout);
             setupConnection(conn, false);
         }
     }, 1000);
 }
 
 // --- Connection & Transfer ---
+
+function safeSend(message) {
+    if (!conn || !conn.open) return;
+    if (typeof message === 'object' && !(message instanceof ArrayBuffer || ArrayBuffer.isView(message) || message instanceof Blob)) {
+        conn.send(JSON.stringify(message));
+    } else {
+        conn.send(message);
+    }
+}
 
 function setupConnection(connection, isSender) {
     conn = connection;
@@ -405,12 +450,12 @@ function setupConnection(connection, isSender) {
             }
             
             console.log("Sending PING (attempt " + (attempts+1) + ")");
-            conn.send({ type: 'ping' });
+            safeSend({ type: 'ping' });
             attempts++;
         }, 1000);
         
         // Also send one immediately
-        conn.send({ type: 'ping' });
+        safeSend({ type: 'ping' });
         
         // Store interval ID to clear it later if PONG received
         conn.handshakeInterval = handshakeInterval;
@@ -447,7 +492,7 @@ async function sendFile() {
         size: fileToSend.size,
         mime: fileToSend.type || 'application/octet-stream'
     };
-    conn.send(meta);
+    safeSend(meta);
 
     // 2. Send Chunks
     const totalChunks = Math.ceil(fileToSend.size / CHUNK_SIZE);
@@ -463,13 +508,13 @@ async function sendFile() {
     const RESUME_THRESHOLD = 8 * 1024 * 1024;     // 8MB
 
     for(let i = 0; i < totalChunks; i++) {
-        if(!conn.open) break;
+        if(!conn || !conn.open) break;
         
         // Flow control: wait if buffer is too full
         if (conn.dataChannel && conn.dataChannel.bufferedAmount > MAX_BUFFERED_AMOUNT) {
             await new Promise(resolve => {
                 const check = setInterval(() => {
-                    if (!conn.dataChannel || conn.dataChannel.bufferedAmount < RESUME_THRESHOLD) {
+                    if (!conn || !conn.dataChannel || conn.dataChannel.bufferedAmount < RESUME_THRESHOLD) {
                         clearInterval(check);
                         resolve();
                     }
@@ -480,14 +525,14 @@ async function sendFile() {
         const slice = fileToSend.slice(offset, offset + CHUNK_SIZE);
         const buffer = await slice.arrayBuffer();
         
-        conn.send(buffer);
+        safeSend(buffer);
         offset += CHUNK_SIZE;
         
         // Update UI intelligently (not every chunk)
         const now = Date.now();
         if (now - lastUiUpdate > updateInterval || i === totalChunks - 1) {
             // Account for buffered amount to show "real" network progress
-            const buffered = conn.dataChannel.bufferedAmount || 0;
+            const buffered = conn.dataChannel ? conn.dataChannel.bufferedAmount : 0;
             const sentBytes = Math.max(0, offset - buffered);
             const percent = (sentBytes / fileToSend.size) * 100;
             
@@ -512,16 +557,23 @@ async function sendFile() {
     }
 
     // Wait for buffer to drain completely
-    while (conn.dataChannel.bufferedAmount > 0) {
-        if(!conn.open) break;
-        const buffered = conn.dataChannel.bufferedAmount;
-        const sentBytes = Math.max(0, fileToSend.size - buffered);
-        const percent = (sentBytes / fileToSend.size) * 100;
-        
-        document.getElementById('sendProgress').value = Math.min(percent, 99);
-        document.getElementById('senderStats').textContent = `${Math.round(percent)}% | Enviando últimos datos...`;
-        
-        await new Promise(r => setTimeout(r, 100));
+    if (conn && conn.dataChannel) {
+        while (conn.dataChannel.bufferedAmount > 0) {
+            if(!conn || !conn.open) break;
+            const buffered = conn.dataChannel.bufferedAmount;
+            const sentBytes = Math.max(0, fileToSend.size - buffered);
+            const percent = (sentBytes / fileToSend.size) * 100;
+            
+            document.getElementById('sendProgress').value = Math.min(percent, 99);
+            document.getElementById('senderStats').textContent = `${Math.round(percent)}% | Enviando últimos datos...`;
+            
+            await new Promise(r => setTimeout(r, 100));
+        }
+    }
+    
+    // Send end marker to signal transfer complete
+    if (conn && conn.open) {
+        safeSend({ type: 'transfer-end' });
     }
     
     // Do NOT show 100% yet. Wait for 'transfer-complete' message from receiver.
@@ -532,88 +584,107 @@ let lastReceiverUpdate = 0;
 let receiveStartTime = 0;
 
 function handleMessage(data) {
-    console.log("Received data:", data);
+    console.log("Received data (raw):", data);
     
-    // Handshake handling
-    if (data && data.type === 'ping') {
-        console.log("Received PING, sending PONG");
-        conn.send({ type: 'pong' });
-        return;
-    }
-    if (data && data.type === 'pong') {
-        console.log("Received PONG, starting transfer");
-        if(conn.handshakeInterval) clearInterval(conn.handshakeInterval);
-        sendFile();
-        return;
-    }
+    // Check if the data is a JSON control message
+    if (typeof data === 'string') {
+        let msg;
+        try {
+            msg = JSON.parse(data);
+        } catch (e) {
+            console.error("Failed to parse JSON control message:", e);
+            return;
+        }
 
-    if (data && data.type === 'metadata') {
-        // Clear any handshake intervals on receiver side if they existed
-        fileMeta = data;
-        receivedBuffers = [];
-        receivedSize = 0;
-        expectedSize = data.size;
-        lastReceiverUpdate = 0;
-        receiveStartTime = Date.now();
-        document.getElementById('receiveStatus').textContent = `Recibiendo: ${data.name}`;
+        console.log("Parsed control message:", msg);
         
-        // Force UI transition to receiving state
-        document.getElementById('receiverStep2').classList.add('hidden');
-        document.getElementById('receiverStep3').classList.remove('hidden');
-    } else if (data && data.type === 'chat') {
-        addMessageToChat(data.message, 'received', data.role);
-        if (document.getElementById('chatContainer').classList.contains('collapsed')) {
-             const btn = document.getElementById('chatToggleBtn');
-             btn.style.animation = 'none';
-             btn.offsetHeight; /* trigger reflow */
-             btn.style.animation = 'pulse 1s';
+        if (msg.type === 'ping') {
+            console.log("Received PING, sending PONG");
+            safeSend({ type: 'pong' });
+            return;
         }
-    } else if (data && data.type === 'transfer-complete') {
-        const t = translations[currentLang];
-        document.getElementById('sendProgress').value = 100;
-        document.getElementById('senderStats').textContent = "100%";
-        document.getElementById('sendStatus').textContent = t.fileReceivedSender;
-    } else if (data && data.type === 'file-downloaded') {
-        const t = translations[currentLang];
-        const warningMsg = document.getElementById('warningMsg');
-        if(warningMsg) {
-            warningMsg.textContent = t.safeToClose;
-            warningMsg.classList.add('success');
+        if (msg.type === 'pong') {
+            console.log("Received PONG, starting transfer");
+            if (conn.handshakeInterval) clearInterval(conn.handshakeInterval);
+            sendFile();
+            return;
         }
-        document.getElementById('sendStatus').textContent = t.fileDownloadedSender;
+        if (msg.type === 'metadata') {
+            fileMeta = msg;
+            receivedBuffers = [];
+            receivedSize = 0;
+            expectedSize = msg.size;
+            lastReceiverUpdate = 0;
+            receiveStartTime = Date.now();
+            document.getElementById('receiveStatus').textContent = `Recibiendo: ${msg.name}`;
+            
+            // Force UI transition to receiving state
+            document.getElementById('receiverStep2').classList.add('hidden');
+            document.getElementById('receiverStep3').classList.remove('hidden');
+            
+            // Set timeout in case transfer gets stuck
+            if (transferTimeout) clearTimeout(transferTimeout);
+            transferTimeout = setTimeout(() => {
+                if (receivedSize < expectedSize && receivedSize > 0) {
+                    console.warn("Transfer timeout, trying to finish anyway");
+                    tryFinishReceive();
+                }
+            }, 30000); // 30 second timeout
+            return;
+        }
+        if (msg.type === 'chat') {
+            addMessageToChat(msg.message, 'received', msg.role);
+            if (document.getElementById('chatContainer').classList.contains('collapsed')) {
+                 const btn = document.getElementById('chatToggleBtn');
+                 btn.style.animation = 'none';
+                 btn.offsetHeight; /* trigger reflow */
+                 btn.style.animation = 'pulse 1s';
+            }
+            return;
+        }
+        if (msg.type === 'transfer-complete') {
+            const t = translations[currentLang];
+            document.getElementById('sendProgress').value = 100;
+            document.getElementById('senderStats').textContent = "100%";
+            document.getElementById('sendStatus').textContent = t.fileReceivedSender;
+            return;
+        }
+        if (msg.type === 'file-downloaded') {
+            const t = translations[currentLang];
+            const warningMsg = document.getElementById('warningMsg');
+            if (warningMsg) {
+                warningMsg.textContent = t.safeToClose;
+                warningMsg.classList.add('success');
+            }
+            document.getElementById('sendStatus').textContent = t.fileDownloadedSender;
+            return;
+        }
+        if (msg.type === 'transfer-end') {
+            document.getElementById('receiverStats').textContent = "100%";
+            finishReceive();
+            return;
+        }
     } else {
         // Binary chunk handling
         let chunk = data;
-        
-        // PeerJS BinaryPack usually returns ArrayBuffer or Uint8Array directly
-        // but let's be safe against wrapped objects just in case
-        if (data && data._data && (data.constructor === Object || data._data instanceof Uint8Array)) {
-             chunk = data._data;
-        }
 
         // Validate chunk is binary-like
         if (chunk instanceof ArrayBuffer || ArrayBuffer.isView(chunk) || chunk instanceof Blob) {
             receivedBuffers.push(chunk);
             receivedSize += chunk.byteLength || chunk.size || 0;
         } else {
-            // If we receive an empty object or something else, it might be a serialization artifact
-            // Log it but don't break
-            if (Object.keys(chunk).length === 0) {
-                 // Ignore empty objects (keepalive or serialization error)
-                 return;
-            }
             console.warn("Received non-binary chunk:", data);
         }
         
         // Throttle UI updates
         const now = Date.now();
         if (now - lastReceiverUpdate > 100 || receivedSize >= expectedSize) {
-            const percent = (receivedSize / expectedSize) * 100;
+            const percent = expectedSize > 0 ? (receivedSize / expectedSize) * 100 : 0;
             document.getElementById('receiveProgress').value = Math.min(percent, 100);
             
             // Calculate stats
             const elapsed = (now - receiveStartTime) / 1000;
-            if (elapsed > 0) {
+            if (elapsed > 0 && expectedSize > 0) {
                 const speed = receivedSize / elapsed;
                 const remaining = expectedSize - receivedSize;
                 const eta = remaining / speed;
@@ -626,19 +697,68 @@ function handleMessage(data) {
         }
 
         if (receivedSize >= expectedSize) {
-            document.getElementById('receiverStats').textContent = "100%";
-            finishReceive();
+            // Validate that we actually have all the data
+            let totalBufferSize = 0;
+            for (const buf of receivedBuffers) {
+                totalBufferSize += buf.byteLength || buf.size || 0;
+            }
+            
+            // Only finish if total buffer size matches expected size
+            if (totalBufferSize >= expectedSize) {
+                document.getElementById('receiverStats').textContent = "100%";
+                finishReceive();
+            } else {
+                console.warn(`Size mismatch: receivedSize=${receivedSize}, totalBufferSize=${totalBufferSize}, expected=${expectedSize}`);
+            }
         }
+    }
+}
+
+// New helper function to safely try finishing receive
+function tryFinishReceive() {
+    if (transferTimeout) {
+        clearTimeout(transferTimeout);
+        transferTimeout = null;
+    }
+    
+    // Validate that we actually have all the data
+    let totalBufferSize = 0;
+    for (const buf of receivedBuffers) {
+        totalBufferSize += buf.byteLength || buf.size || 0;
+    }
+    
+    console.log(`Checking completion: receivedSize=${receivedSize}, totalBufferSize=${totalBufferSize}, expected=${expectedSize}`);
+    
+    // Only finish if we have enough data
+    if (totalBufferSize >= expectedSize && expectedSize > 0) {
+        document.getElementById('receiverStats').textContent = "100%";
+        finishReceive();
+    } else if (totalBufferSize > 0 && expectedSize > 0) {
+        // If we have data but not enough, wait a bit more and try again
+        console.warn(`Waiting for more data...`);
     }
 }
 
 function finishReceive() {
     const t = translations[currentLang];
+    
+    // Double-check total size before creating blob
+    let totalBufferSize = 0;
+    for (const buf of receivedBuffers) {
+        totalBufferSize += buf.byteLength || buf.size || 0;
+    }
+    
+    if (totalBufferSize < expectedSize) {
+        console.error(`Incomplete file: received ${totalBufferSize} of ${expectedSize} bytes`);
+        document.getElementById('receiveStatus').textContent = "Error: Archivo incompleto. Intenta de nuevo.";
+        return;
+    }
+    
     document.getElementById('receiveStatus').textContent = t.transferComplete;
     
     // Notify sender
     if(conn && conn.open) {
-        conn.send({ type: 'transfer-complete' });
+        safeSend({ type: 'transfer-complete' });
     }
 
     const blob = new Blob(receivedBuffers, { type: fileMeta.mime });
@@ -653,7 +773,7 @@ function finishReceive() {
     // Notify sender on download
     link.onclick = () => {
         if(conn && conn.open) {
-            conn.send({ type: 'file-downloaded' });
+            safeSend({ type: 'file-downloaded' });
         }
     };
     
@@ -788,7 +908,7 @@ function sendChatMessage() {
     if (!message || !conn || !conn.open) return;
 
     // Send to peer
-    conn.send({ type: 'chat', message: message, role: currentRole });
+    safeSend({ type: 'chat', message: message, role: currentRole });
 
     // Display locally
     addMessageToChat(message, 'sent', currentRole);
